@@ -1,0 +1,15 @@
+{
+  "name": "web_rtccam",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "web_rtccam_bg.wasm",
+    "web_rtccam.js",
+    "web_rtccam.d.ts"
+  ],
+  "main": "web_rtccam.js",
+  "types": "web_rtccam.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
