@@ -1,0 +1,8 @@
+services:
+  wasm:
+    build:
+      context: .
+      dockerfile: ./docker/wasm/Dockerfile
+    ports:
+      - 80:80
+    tty: true
