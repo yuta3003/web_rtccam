@@ -18,12 +18,12 @@ ENV PATH="${CARGO_HOME}/bin:${PATH}"
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 
-RUN rustup update
+RUN rustup update && \
+    rustup target add wasm32-unknown-unknown
 
-RUN rustup target add wasm32-unknown-unknown
-
-RUN cargo install wasm-pack
-RUN cargo install --force cargo-make
+RUN cargo install \
+        wasm-pack \
+        cargo-make
 
 WORKDIR /src
 COPY ./wasm ./
