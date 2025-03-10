@@ -1,7 +1,6 @@
 # ---------------------------------
 # Rust build stage
 # ---------------------------------
-# FROM debian:stable-slim AS rust_builder
 FROM debian:bullseye-slim AS rust_builder
 
 RUN apt-get update && \
@@ -26,7 +25,7 @@ COPY ./signaling ./
 RUN cargo build --release
 
 # ---------------------------------
-# Node.js build stage
+# Run stage
 # ---------------------------------
 FROM debian:bullseye-slim
 

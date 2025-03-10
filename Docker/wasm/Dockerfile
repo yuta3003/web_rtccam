@@ -40,7 +40,7 @@ FROM node:18-slim
 
 WORKDIR /webrtc
 COPY ./webrtc ./
-COPY --from=rust_builder /wasm/pkg ./src/wasm
+# COPY --from=rust_builder /wasm/pkg ./src/wasm
 
 #RUN npm install
 #RUN npm run build
