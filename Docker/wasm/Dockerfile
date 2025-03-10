@@ -33,14 +33,21 @@ RUN wasm-pack build --target web
 # ---------------------------------
 # Node.js build stage
 # ---------------------------------
-#FROM node:18-slim AS node_builder
-FROM node:18-slim
-
-#RUN npm install @wasm-tool/wasm-pack-plugin
+FROM node:18-slim AS node_builder
 
 WORKDIR /webrtc
 COPY ./webrtc ./
 # COPY --from=rust_builder /wasm/pkg ./src/wasm
 
-#RUN npm install
-#RUN npm run build
+RUN npm install
+RUN npm run build
+
+# ---------------------------------
+# Final stage
+# ---------------------------------
+FROM nginx:alpine AS final_stage
+
+COPY --from=node_builder /webrtc/out /usr/share/nginx/html
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
