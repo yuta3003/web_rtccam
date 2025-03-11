@@ -10,7 +10,7 @@ export default function Home() {
   const [pendingSDP, setPendingSDP] = useState<any | null>(null);
 
   useEffect(() => {
-    // WebSocket
+    // WebSocket 接続
     const ws = new WebSocket("ws://localhost:8080/ws");
 
     ws.onopen = () => {
@@ -27,6 +27,9 @@ export default function Home() {
       } else if (data.sdp) {
         console.log("🔄 SDP メッセージ受信:", data.sdp);
         setPendingSDP(data);
+      } else if (data.candidate) {
+        console.log("📡 ICE Candidate 受信:", data.candidate);
+        handleIceCandidateMessage(data);
       }
     };
 
@@ -35,19 +38,53 @@ export default function Home() {
 
     setSocket(ws);
 
-    // WebRTC
+    // WebRTC 接続
     const iceConfig: RTCConfiguration = {
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        // { urls: "stun:stun.l.google.com:19302" },
+      ],
     };
 
-    peerConnectionRef.current = new RTCPeerConnection(iceConfig);
+    const peerConnection = new RTCPeerConnection(iceConfig);
+    peerConnectionRef.current = peerConnection;
+
+    console.log("📡 peerConnectionRef", peerConnectionRef);
+
+    // ✅ ICE Candidate 生成時のログを強化
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log("📡 ICE Candidate 生成:", event.candidate);
+        sendMessage({ to: peerId, candidate: event.candidate, type: "candidate" });
+      } else {
+        console.log("❗ ICE Candidate 生成完了 (null が返された) → ICE Gathering 終了");
+      }
+    };
+
+    // ✅ ICE Gathering 状態を詳細にログ出力
+    peerConnection.onicegatheringstatechange = () => {
+      console.log("🔄 ICE Gathering State:", peerConnection.iceGatheringState);
+    };
+
+    // ✅ ICE Connection 状態をログに出力
+    peerConnection.oniceconnectionstatechange = () => {
+      console.log("🔄 ICE Connection State:", peerConnection.iceConnectionState);
+    };
+
+    // ✅ ネゴシエーションが必要になったら Offer を作成
+    peerConnection.onnegotiationneeded = async () => {
+      console.log("⚡ ネゴシエーション開始");
+      if (!peerConnectionRef.current) return;
+      const offer = await peerConnectionRef.current.createOffer();
+      await peerConnectionRef.current.setLocalDescription(offer);
+      console.log("✅ setLocalDescription (onnegotiationneeded) 完了");
+      sendMessage({ to: peerId, sdp: offer, type: "offer" });
+    };
 
     return () => {
       ws.close();
       peerConnectionRef.current?.close();
     };
   }, []);
-
 
   // ✅ clientId が設定された後に SDP を処理
   useEffect(() => {
@@ -57,7 +94,6 @@ export default function Home() {
       setPendingSDP(null);
     }
   }, [clientId, pendingSDP]);
-
 
   // ✅ メッセージ送信
   const sendMessage = (message: object) => {
@@ -98,6 +134,7 @@ export default function Home() {
 
     console.log("🔄 SDP 処理開始:", data.sdp);
     await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    console.log(peerConnectionRef);
 
     if (data.sdp.type === "offer") {
       const answer = await peerConnectionRef.current.createAnswer();
@@ -108,9 +145,22 @@ export default function Home() {
     }
   };
 
+  // ✅ ICE Candidate メッセージ処理
+  const handleIceCandidateMessage = async (data: any) => {
+    if (!peerConnectionRef.current) return;
+
+    try {
+      console.log("📡 ICE Candidate 受信:", data.candidate);
+      await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+      console.log("✅ ICE Candidate 追加完了");
+    } catch (error) {
+      console.error("❌ ICE Candidate 追加エラー:", error);
+    }
+  };
+
   return (
     <main className="flex flex-col items-center justify-center min-h-screen p-4">
-      <h1 className="text-2xl font-bold mb-4">WebRTC Basic Connection (No ICE)</h1>
+      <h1 className="text-2xl font-bold mb-4">WebRTC Connection with ICE</h1>
 
       <div className="mb-4">
         <p className="text-lg font-semibold">Your Client ID:</p>
