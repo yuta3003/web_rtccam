@@ -17,3 +17,15 @@ services:
     environment:
       - RUST_LOG=info
     restart: unless-stopped
+
+  # coturn:
+  #   image: coturn/coturn
+  #   container_name: coturn_server
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3478:3478"
+  #     - "3478:3478/udp"
+  #     - "5349:5349"
+  #     - "5349:5349/udp"
+  #     - "49160-49200:49160-49200/udp"
+  #   command: ["--min-port=49160", "--max-port=49200"]
