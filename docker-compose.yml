@@ -1,17 +1,26 @@
 services:
-  # wasm:
-  #   build:
-  #     context: .
-  #     dockerfile: ./docker/wasm/Dockerfile
-  #   ports:
-  #     - 80:80
-  #     - 3000:3000
-  #   tty: true
+  # フロントエンド (Next.js)
+  webrtc:
+    build:
+      context: .
+      dockerfile: ./Docker/webrtc/Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./webrtc:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+    depends_on:
+      - signaling-server
+    restart: unless-stopped
 
+  # シグナリングサーバー (Rust)
   signaling-server:
     build:
       context: .
-      dockerfile: ./docker/signaling/Dockerfile
+      dockerfile: ./Docker/signaling/Dockerfile
     ports:
       - "8080:8080"
     environment:

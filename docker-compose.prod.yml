@@ -1,0 +1,24 @@
+services:
+  # フロントエンド (Next.js) - 本番環境
+  webrtc:
+    build:
+      context: .
+      dockerfile: ./Docker/webrtc/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - signaling-server
+    restart: unless-stopped
+
+  # シグナリングサーバー (Rust)
+  signaling-server:
+    build:
+      context: .
+      dockerfile: ./Docker/signaling/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped

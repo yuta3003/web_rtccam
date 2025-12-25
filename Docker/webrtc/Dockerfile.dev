@@ -1,0 +1,19 @@
+# 開発環境用Dockerfile
+FROM node:18-slim
+
+WORKDIR /app
+
+# パッケージファイルをコピー
+COPY webrtc/package*.json ./
+
+# 依存関係をインストール
+RUN npm install
+
+# ソースコードをコピー（ボリュームマウントで上書きされる）
+COPY webrtc/ ./
+
+# ポート3000を公開
+EXPOSE 3000
+
+# 開発サーバー起動
+CMD ["npm", "run", "dev"]
