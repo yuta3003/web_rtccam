@@ -1,6 +1,30 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  RTC_CONFIGURATION,
+  MEDIA_CONSTRAINTS,
+  MESSAGE_TYPES,
+  SIGNALING_STATES
+} from "@/utils/webrtc-constants";
+import {
+  getWebSocketUrl,
+  addTracksToConnection,
+  hasTracksAdded,
+  getConnectionStateColor,
+  isPeerIdEmpty,
+  isMediaStreamReady,
+} from "@/utils/webrtc-helpers";
+import type {
+  SignalingMessage,
+  SDPMessage,
+  ICECandidateMessage,
+} from "@/types";
+import {
+  isWelcomeMessage as checkWelcomeMessage,
+  isSDPMessage as checkSDPMessage,
+  isICECandidateMessage as checkICECandidateMessage,
+} from "@/types";
 
 export default function Home() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -13,7 +37,7 @@ export default function Home() {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
   const [peerId, setPeerId] = useState<string>("");
-  const [pendingSDP, setPendingSDP] = useState<any | null>(null);
+  const [pendingSDP, setPendingSDP] = useState<SDPMessage | null>(null);
   const [connectionState, setConnectionState] = useState<string>("disconnected");
   const [isLocalStreamReady, setIsLocalStreamReady] = useState<boolean>(false);
 
@@ -23,20 +47,23 @@ export default function Home() {
   }, [peerId]);
 
   useEffect(() => {
-    // カメラ・マイクアクセス
+    /**
+     * カメラとマイクへのアクセスを初期化
+     * 取得したストリームをローカルビデオに表示する
+     */
     const initLocalStream = async () => {
       try {
         console.log("📹 カメラ・マイクアクセス開始...");
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
 
+        const stream = await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS);
+
+        // ストリームを保存
         localStreamRef.current = stream;
 
-        // ローカルビデオに表示
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
+        // ローカルビデオ要素が存在する場合、ストリームを設定
+        const localVideoElement = localVideoRef.current;
+        if (localVideoElement) {
+          localVideoElement.srcObject = stream;
         }
 
         setIsLocalStreamReady(true);
@@ -49,22 +76,10 @@ export default function Home() {
 
     initLocalStream();
 
-    // WebSocket 接続
-    // 環境変数からシグナリングサーバーのURLを取得
-    // 未設定の場合は現在のホスト名を使用（同じネットワーク内で動作）
-    const getWebSocketUrl = () => {
-      if (process.env.NEXT_PUBLIC_SIGNALING_SERVER_URL) {
-        return process.env.NEXT_PUBLIC_SIGNALING_SERVER_URL;
-      }
-      // ブラウザで実行中の場合、現在のホスト名を使用
-      if (typeof window !== 'undefined') {
-        const host = window.location.hostname;
-        return `ws://${host}:8080/ws`;
-      }
-      // デフォルト
-      return "ws://localhost:8080/ws";
-    };
-
+    /**
+     * WebSocketシグナリングサーバーへの接続
+     * 環境変数 > 現在のホスト名 > デフォルト の順で接続先を決定
+     */
     const wsUrl = getWebSocketUrl();
     console.log("📡 WebSocket接続先:", wsUrl);
     const ws = new WebSocket(wsUrl);
@@ -75,17 +90,20 @@ export default function Home() {
 
     ws.onmessage = (event) => {
       console.log("📩 WebSocket 受信:", event.data);
-      const data = JSON.parse(event.data);
+      const message: SignalingMessage = JSON.parse(event.data);
 
-      if (data.type === "welcome") {
-        setClientId(data.id);
-        console.log(`🆔 Assigned Client ID: ${data.id}`);
-      } else if (data.sdp) {
-        console.log("🔄 SDP メッセージ受信:", data.sdp);
-        setPendingSDP(data);
-      } else if (data.candidate) {
-        console.log("📡 ICE Candidate 受信:", data.candidate);
-        handleIceCandidateMessage(data);
+      if (checkWelcomeMessage(message)) {
+        // サーバーからクライアントIDを受信
+        setClientId(message.id);
+        console.log(`🆔 Assigned Client ID: ${message.id}`);
+      } else if (checkSDPMessage(message)) {
+        // SDP Offer/Answerメッセージを受信
+        console.log("🔄 SDP メッセージ受信:", message.sdp);
+        setPendingSDP(message);
+      } else if (checkICECandidateMessage(message)) {
+        // ICE Candidateメッセージを受信
+        console.log("📡 ICE Candidate 受信:", message.candidate);
+        handleIceCandidateMessage(message);
       }
     };
 
@@ -94,33 +112,39 @@ export default function Home() {
 
     setSocket(ws);
 
-    // WebRTC 接続（STUN/TURNサーバー有効化）
-    const iceConfig: RTCConfiguration = {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-      ],
-    };
-
-    const peerConnection = new RTCPeerConnection(iceConfig);
+    /**
+     * WebRTC Peer Connectionの初期化
+     * STUN/TURNサーバーを設定してNAT越え接続を可能にする
+     */
+    const peerConnection = new RTCPeerConnection(RTC_CONFIGURATION);
     peerConnectionRef.current = peerConnection;
 
-    console.log("📡 peerConnectionRef", peerConnectionRef);
+    console.log("📡 RTCPeerConnection初期化完了");
 
-    // ICE Candidate 生成時
+    /**
+     * ICE Candidate生成時のハンドラー
+     * 生成されたCandidateを相手に送信する
+     */
     peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
+      const hasCandidate = event.candidate !== null;
+      const hasPeerId = peerIdRef.current !== "";
+
+      if (hasCandidate) {
         console.log("📡 ICE Candidate 生成:", event.candidate);
-        console.log("📝 現在のpeerIdRef.current:", peerIdRef.current);
-        // peerIdRefを使って最新のpeerIdを参照
-        if (peerIdRef.current) {
+        console.log("📝 現在の接続先Peer ID:", peerIdRef.current);
+
+        if (hasPeerId) {
           console.log(`📤 ICE Candidateを${peerIdRef.current}に送信`);
-          sendMessage({ to: peerIdRef.current, candidate: event.candidate, type: "candidate" });
+          sendMessage({
+            to: peerIdRef.current,
+            candidate: event.candidate,
+            type: MESSAGE_TYPES.CANDIDATE
+          });
         } else {
-          console.warn("⚠ ICE Candidate生成されましたが、peerIdが未設定のため送信できません");
+          console.warn("⚠ ICE Candidate生成されましたが、Peer IDが未設定のため送信できません");
         }
       } else {
-        console.log("❗ ICE Candidate 生成完了 (null が返された) → ICE Gathering 終了");
+        console.log("❗ ICE Candidate 生成完了 → ICE Gathering 終了");
       }
     };
 
@@ -138,16 +162,25 @@ export default function Home() {
     // リモートストリーム受信
     peerConnection.ontrack = (event) => {
       console.log("📥 リモートトラック受信:", event.streams[0]);
-      if (remoteVideoRef.current && event.streams[0]) {
-        remoteVideoRef.current.srcObject = event.streams[0];
+      const remoteVideoElement = remoteVideoRef.current;
+      const remoteStream = event.streams[0];
+
+      if (remoteVideoElement && remoteStream) {
+        remoteVideoElement.srcObject = remoteStream;
         console.log("✅ リモートビデオ設定完了");
       }
     };
 
-    // シグナリング状態の監視（デバッグ用）
+    /**
+     * シグナリング状態変更時のハンドラー
+     * stable状態になったらネゴシエーション完了とみなす
+     */
     peerConnection.onsignalingstatechange = () => {
-      console.log("🔄 Signaling State:", peerConnection.signalingState);
-      if (peerConnection.signalingState === "stable") {
+      const currentState = peerConnection.signalingState;
+      console.log("🔄 Signaling State:", currentState);
+
+      const isNegotiationComplete = currentState === SIGNALING_STATES.STABLE;
+      if (isNegotiationComplete) {
         isNegotiatingRef.current = false;
         console.log("✅ ネゴシエーション完了（stable状態）");
       }
@@ -179,100 +212,129 @@ export default function Home() {
     socket?.send(JSON.stringify({ from: clientId, ...message }));
   };
 
-  // SDP Offer 作成（接続開始）
+  /**
+   * SDP Offerを作成して接続を開始する
+   * @description 発信側（Caller）が実行する関数
+   */
   const createOffer = async () => {
-    if (!peerConnectionRef.current || !peerId) {
+    const peerConnection = peerConnectionRef.current;
+    const localStream = localStreamRef.current;
+
+    // 事前条件チェック: Peer Connectionが初期化されているか
+    const isPeerConnectionReady = peerConnection !== null;
+    const hasPeerId = !isPeerIdEmpty(peerId);
+    const isStreamReady = isMediaStreamReady(isLocalStreamReady, localStream);
+    const isAlreadyNegotiating = isNegotiatingRef.current;
+
+    if (!isPeerConnectionReady || !hasPeerId) {
       console.error("❌ 接続先の Peer ID が未設定");
       alert("接続先のClient IDを入力してください");
       return;
     }
 
-    if (!isLocalStreamReady || !localStreamRef.current) {
+    if (!isStreamReady || !localStream) {
       console.error("❌ ローカルストリームが準備できていません");
       alert("カメラの準備ができていません");
       return;
     }
 
-    if (isNegotiatingRef.current) {
+    if (isAlreadyNegotiating) {
       console.log("⚠ 既にネゴシエーション中のため、接続開始をスキップします");
       return;
     }
 
     try {
+      // ネゴシエーション開始フラグを立てる
       isNegotiatingRef.current = true;
       console.log("⚡ 接続開始: ローカルトラックを追加");
 
-      // すでにトラックが追加されているかチェック
-      const senders = peerConnectionRef.current.getSenders();
-      if (senders.length === 0) {
-        // ローカルストリームのトラックをpeerConnectionに追加
-        const localStream = localStreamRef.current;
-        localStream.getTracks().forEach(track => {
-          console.log("➕ トラック追加:", track.kind, track.label);
-          peerConnectionRef.current?.addTrack(track, localStream);
-        });
-        console.log("✅ トラック追加完了");
+      // トラックが未追加の場合のみ追加する（重複を防ぐ）
+      const alreadyHasTracks = hasTracksAdded(peerConnection);
+      if (!alreadyHasTracks) {
+        // この時点でlocalStreamはnullでないことが保証されている
+        addTracksToConnection(peerConnection, localStream);
       } else {
         console.log("⚠ トラックは既に追加済みです");
       }
 
-      // Offerを作成
-      console.log("⚡ createOffer 実行開始");
-      const offer = await peerConnectionRef.current.createOffer();
-      console.log("📜 SDP Offer 作成:", offer);
+      // SDP Offerを作成
+      console.log("⚡ SDP Offer 作成開始");
+      const offer = await peerConnection.createOffer();
+      console.log("📜 SDP Offer 作成完了:", offer);
 
-      await peerConnectionRef.current.setLocalDescription(offer);
+      // ローカルのSessionDescriptionを設定
+      await peerConnection.setLocalDescription(offer);
       console.log("✅ setLocalDescription 実行完了");
 
-      sendMessage({ to: peerId, sdp: offer, type: "offer" });
-      console.log("📤 SDP Offer 送信:", offer);
+      // 相手にOfferを送信
+      sendMessage({
+        to: peerId,
+        sdp: offer,
+        type: MESSAGE_TYPES.OFFER
+      });
+      console.log("📤 SDP Offer 送信完了");
     } catch (error) {
       console.error("❌ SDP Offer 作成エラー:", error);
       isNegotiatingRef.current = false;
     }
   };
 
-  // SDP メッセージ処理
-  const handleSDPMessage = async (data: any) => {
-    if (!peerConnectionRef.current) return;
+  /**
+   * SDP Offer/Answerメッセージを処理する
+   * @description 相手から受信したSDPを設定し、必要に応じてAnswerを返す
+   */
+  const handleSDPMessage = async (data: SDPMessage) => {
+    const peerConnection = peerConnectionRef.current;
+    const localStream = localStreamRef.current;
+
+    if (!peerConnection) return;
 
     try {
       console.log("🔄 SDP 処理開始:", data.sdp);
 
-      // 送信元のIDを自動的に記憶（受信側が相手のIDを知るため）
-      if (data.from) {
-        if (!peerId || peerId === "") {
+      // 送信元のPeer IDを自動設定（受信側が相手のIDを知るため）
+      const hasSenderInfo = data.from !== undefined;
+      const currentPeerIdIsEmpty = isPeerIdEmpty(peerId);
+      const isDifferentPeer = peerId !== data.from;
+
+      if (hasSenderInfo) {
+        if (currentPeerIdIsEmpty) {
+          // Peer IDが未設定の場合、送信元を自動設定
           console.log(`📝 接続相手のIDを自動設定: ${data.from}`);
           setPeerId(data.from);
-          peerIdRef.current = data.from; // 即座にRefも更新
-        } else if (peerId !== data.from) {
+          peerIdRef.current = data.from;
+        } else if (isDifferentPeer) {
           console.log(`⚠ 既に異なるPeer ID(${peerId})が設定されていますが、${data.from}から接続要求を受信しました`);
         }
       }
 
-      // Offerを受信した場合、まずローカルトラックを追加
-      if (data.sdp.type === "offer" && localStreamRef.current) {
-        const senders = peerConnectionRef.current.getSenders();
-        if (senders.length === 0) {
-          console.log("⚡ Offer受信時にローカルトラックを追加");
-          const localStream = localStreamRef.current;
-          localStream.getTracks().forEach(track => {
-            console.log("➕ トラック追加:", track.kind, track.label);
-            peerConnectionRef.current?.addTrack(track, localStream);
-          });
-        }
+      // Offer受信時: ローカルトラックを追加（Answerを返す側も映像・音声を送る）
+      const isOfferMessage = data.sdp.type === MESSAGE_TYPES.OFFER;
+      const needsToAddTracks = !hasTracksAdded(peerConnection);
+
+      if (isOfferMessage && localStream && needsToAddTracks) {
+        console.log("⚡ Offer受信時にローカルトラックを追加");
+        // この時点でlocalStreamはnullでないことが保証されている
+        addTracksToConnection(peerConnection, localStream);
       }
 
-      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      // リモートのSessionDescriptionを設定
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
       console.log("✅ setRemoteDescription 完了");
 
-      if (data.sdp.type === "offer") {
+      // Offerを受信した場合はAnswerを作成して返送
+      if (isOfferMessage) {
         isNegotiatingRef.current = true;
-        const answer = await peerConnectionRef.current.createAnswer();
-        await peerConnectionRef.current.setLocalDescription(answer);
 
-        sendMessage({ to: data.from, sdp: answer, type: "answer" });
-        console.log("📤 SDP Answer 送信:", answer);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        sendMessage({
+          to: data.from,
+          sdp: answer,
+          type: MESSAGE_TYPES.ANSWER
+        });
+        console.log("📤 SDP Answer 送信完了");
       }
     } catch (error) {
       console.error("❌ SDP 処理エラー:", error);
@@ -280,40 +342,32 @@ export default function Home() {
     }
   };
 
-  // ICE Candidate メッセージ処理
-  const handleIceCandidateMessage = async (data: any) => {
-    if (!peerConnectionRef.current) return;
+  /**
+   * ICE Candidateメッセージを処理する
+   * @description 相手から受信したICE Candidateを追加する
+   */
+  const handleIceCandidateMessage = async (data: ICECandidateMessage) => {
+    const peerConnection = peerConnectionRef.current;
+
+    if (!peerConnection) return;
 
     try {
-      // 送信元のIDを自動的に記憶（まだ設定されていない場合）
-      if (data.from) {
-        if (!peerId || peerId === "") {
-          console.log(`📝 ICE Candidate受信時に接続相手のIDを自動設定: ${data.from}`);
-          setPeerId(data.from);
-          peerIdRef.current = data.from; // 即座にRefも更新
-        }
+      // 送信元のPeer IDを自動設定（まだ設定されていない場合）
+      const hasSenderInfo = data.from !== undefined;
+      const currentPeerIdIsEmpty = isPeerIdEmpty(peerId);
+
+      if (hasSenderInfo && currentPeerIdIsEmpty) {
+        console.log(`📝 ICE Candidate受信時に接続相手のIDを自動設定: ${data.from}`);
+        setPeerId(data.from);
+        peerIdRef.current = data.from;
       }
 
+      // ICE Candidateを追加
       console.log("📡 ICE Candidate 追加中:", data.candidate);
-      await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
       console.log("✅ ICE Candidate 追加完了");
     } catch (error) {
       console.error("❌ ICE Candidate 追加エラー:", error);
-    }
-  };
-
-  // 接続状態の色
-  const getConnectionStateColor = () => {
-    switch (connectionState) {
-      case "connected":
-        return "bg-green-500";
-      case "connecting":
-        return "bg-yellow-500";
-      case "failed":
-      case "disconnected":
-        return "bg-red-500";
-      default:
-        return "bg-gray-500";
     }
   };
 
@@ -324,7 +378,7 @@ export default function Home() {
       {/* 接続状態インジケーター */}
       <div className="mb-4 flex items-center gap-2">
         <span>接続状態:</span>
-        <div className={`w-3 h-3 rounded-full ${getConnectionStateColor()}`}></div>
+        <div className={`w-3 h-3 rounded-full ${getConnectionStateColor(connectionState)}`}></div>
         <span className="font-mono">{connectionState}</span>
       </div>
 
