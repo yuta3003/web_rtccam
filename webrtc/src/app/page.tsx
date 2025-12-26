@@ -50,7 +50,24 @@ export default function Home() {
     initLocalStream();
 
     // WebSocket 接続
-    const ws = new WebSocket("ws://localhost:8080/ws");
+    // 環境変数からシグナリングサーバーのURLを取得
+    // 未設定の場合は現在のホスト名を使用（同じネットワーク内で動作）
+    const getWebSocketUrl = () => {
+      if (process.env.NEXT_PUBLIC_SIGNALING_SERVER_URL) {
+        return process.env.NEXT_PUBLIC_SIGNALING_SERVER_URL;
+      }
+      // ブラウザで実行中の場合、現在のホスト名を使用
+      if (typeof window !== 'undefined') {
+        const host = window.location.hostname;
+        return `ws://${host}:8080/ws`;
+      }
+      // デフォルト
+      return "ws://localhost:8080/ws";
+    };
+
+    const wsUrl = getWebSocketUrl();
+    console.log("📡 WebSocket接続先:", wsUrl);
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       console.log("✅ WebSocket Connected");
