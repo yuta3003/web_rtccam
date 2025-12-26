@@ -177,7 +177,7 @@ export default function Home() {
      */
     peerConnection.onsignalingstatechange = () => {
       const currentState = peerConnection.signalingState;
-      console.log("🔄 Signaling State:", currentState);
+      console.log("� Signaling State:", currentState);
 
       const isNegotiationComplete = currentState === SIGNALING_STATES.STABLE;
       if (isNegotiationComplete) {
@@ -272,7 +272,7 @@ export default function Home() {
         sdp: offer,
         type: MESSAGE_TYPES.OFFER
       });
-      console.log("📤 SDP Offer 送信完了");
+      console.log("� SDP Offer 送信完了");
     } catch (error) {
       console.error("❌ SDP Offer 作成エラー:", error);
       isNegotiatingRef.current = false;
@@ -290,7 +290,7 @@ export default function Home() {
     if (!peerConnection) return;
 
     try {
-      console.log("🔄 SDP 処理開始:", data.sdp);
+      console.log("� SDP 処理開始:", data.sdp);
 
       // 送信元のPeer IDを自動設定（受信側が相手のIDを知るため）
       const hasSenderInfo = data.from !== undefined;
