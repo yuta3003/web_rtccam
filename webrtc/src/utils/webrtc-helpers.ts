@@ -13,8 +13,13 @@ export function getWebSocketUrl(): string {
 
   // ブラウザで実行中の場合、現在のホスト名を使用
   if (typeof window !== 'undefined') {
-    const currentHost = window.location.hostname;
-    return `ws://${currentHost}:${SIGNALING_SERVER.DEFAULT_PORT}${SIGNALING_SERVER.WS_PATH}`;
+    // HTTPSの場合はwss、HTTPの場合はwsを使用
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const currentHost = window.location.host; // host includes port if present
+
+    // Nginx経由でアクセスしている場合（ポート番号なし、または80番）
+    // WebSocketは同じホストの/wsパスで提供される
+    return `${protocol}//${currentHost}${SIGNALING_SERVER.WS_PATH}`;
   }
 
   // デフォルト（サーバーサイドレンダリング時など）
